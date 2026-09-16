@@ -1,5 +1,5 @@
 name = "instagram-web-auto-sync"
-main = "src/index.js"
+main = "src/worker.js"
 compatibility_date = "2026-09-16"
 
 [vars]
