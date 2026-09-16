@@ -6,10 +6,10 @@ compatibility_date = "2026-09-16"
 IG_API_VERSION = "v25.0"
 SYNC_BATCH_SIZE = "25"
 
+# Cloudflare Wrangler 4 can automatically provision D1 when only the binding is set.
+# This avoids hard-coding an account-specific database_id in GitHub.
 [[d1_databases]]
 binding = "DB"
-database_name = "instagram-web-auto-sync-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
 [triggers]
 crons = ["*/10 * * * *"]
