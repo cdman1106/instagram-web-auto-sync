@@ -1,0 +1,24 @@
+name = "instagram-web-auto-sync"
+main = "src/index.js"
+compatibility_date = "2026-09-16"
+
+[vars]
+IG_API_VERSION = "v25.0"
+SYNC_BATCH_SIZE = "25"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "instagram-web-auto-sync-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+# Add these in Cloudflare Dashboard > Worker > Settings > Variables and Secrets:
+# ADMIN_PASSWORD              (Secret)
+# ADMIN_SESSION_SECRET        (Secret, 32+ random chars)
+# TOKEN_ENCRYPTION_KEY        (Secret, 64 hex chars = 32 bytes)
+# IG_APP_ID                   (Text)
+# IG_APP_SECRET               (Secret)
+# IG_REDIRECT_URI             (Text, e.g. https://your-worker.workers.dev/oauth/callback)
+# PUBLIC_BASE_URL             (Text, e.g. https://your-worker.workers.dev)
