@@ -31,6 +31,20 @@ export default {
       });
     }
 
+    if (url.pathname === "/api/site-visibility" && (request.method === "GET" || request.method === "OPTIONS")) {
+      return publicSiteVisibility(request, env);
+    }
+
+    if (url.pathname === "/api/admin/site-visibility" && request.method === "GET") {
+      await requireAdmin(request, env);
+      return adminSiteVisibility(request, env);
+    }
+
+    if (url.pathname === "/api/admin/site-visibility" && request.method === "POST") {
+      await requireAdmin(request, env);
+      return updateSiteVisibility(request, env);
+    }
+
     const disconnectMatch = url.pathname.match(/^\/api\/admin\/sites\/([^/]+)\/disconnect$/);
     if (disconnectMatch && request.method === "POST") {
       await requireAdmin(request, env);
@@ -49,12 +63,13 @@ function nowSec() {
   return Math.floor(Date.now() / 1000);
 }
 
-function json(data, status = 200) {
+function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+      ...extraHeaders,
     },
   });
 }
@@ -127,6 +142,102 @@ async function requireAdmin(request, env) {
   }
 }
 
+async function ensureSiteVisibilityTable(env) {
+  if (!env.DB) throw new Error("DB is not configured");
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS site_visibility (
+      origin TEXT PRIMARY KEY,
+      is_public INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    )
+  `).run();
+}
+
+function normalizeOrigin(value) {
+  let url;
+  try {
+    url = new URL(String(value || "").trim());
+  } catch {
+    throw new Error("Invalid origin");
+  }
+  if (!/^https?:$/.test(url.protocol)) throw new Error("Invalid origin");
+  return url.origin;
+}
+
+async function readVisibility(env, origin) {
+  await ensureSiteVisibilityTable(env);
+  const row = await env.DB.prepare(
+    "SELECT origin, is_public, updated_at FROM site_visibility WHERE origin = ?"
+  ).bind(origin).first();
+  return row
+    ? { configured: true, public: Boolean(row.is_public), updated_at: Number(row.updated_at || 0) }
+    : { configured: false, public: false, updated_at: null };
+}
+
+async function publicSiteVisibility(request, env) {
+  const url = new URL(request.url);
+  const requested = request.headers.get("Origin") || url.searchParams.get("origin") || "";
+  let origin;
+  try {
+    origin = normalizeOrigin(requested);
+  } catch {
+    return json({ error: "origin_required" }, 400);
+  }
+
+  const cors = {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin",
+  };
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+  const visibility = await readVisibility(env, origin);
+  return json({ origin, ...visibility }, 200, cors);
+}
+
+async function adminSiteVisibility(request, env) {
+  const url = new URL(request.url);
+  let origin;
+  try {
+    origin = normalizeOrigin(url.searchParams.get("origin") || "https://ginno-furaipan.com");
+  } catch {
+    return json({ error: "URLが正しくありません" }, 400);
+  }
+  const visibility = await readVisibility(env, origin);
+  return json({ origin, ...visibility });
+}
+
+async function updateSiteVisibility(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON" }, 400);
+  }
+
+  let origin;
+  try {
+    origin = normalizeOrigin(body.origin || "https://ginno-furaipan.com");
+  } catch {
+    return json({ error: "URLが正しくありません" }, 400);
+  }
+  if (typeof body.public !== "boolean") return json({ error: "公開状態が不正です" }, 400);
+
+  await ensureSiteVisibilityTable(env);
+  const now = nowSec();
+  await env.DB.prepare(`
+    INSERT INTO site_visibility (origin, is_public, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(origin) DO UPDATE SET
+      is_public = excluded.is_public,
+      updated_at = excluded.updated_at
+  `).bind(origin, body.public ? 1 : 0, now).run();
+
+  return json({ ok: true, origin, configured: true, public: body.public, updated_at: now });
+}
+
 async function disconnectSite(siteId, env) {
   const site = await env.DB.prepare("SELECT id FROM sites WHERE id = ?").bind(siteId).first();
   if (!site) return json({ error: "Site not found" }, 404);
@@ -171,7 +282,56 @@ function adminEnhancementsScript() {
       if(!r.ok)throw new Error(d.error||'Request failed');
       return d;
     };
+    async function ensureVisibilityPanel(){
+      const app=$('#app');
+      if(!app||$('#ginnoVisibility'))return;
+      const grid=app.querySelector('.grid');
+      if(!grid)return;
+
+      const panel=document.createElement('section');
+      panel.id='ginnoVisibility';
+      panel.className='card';
+      panel.style.cssText='margin:0 0 18px;border-color:#3b4658;background:linear-gradient(135deg,#171e2c,#1d2637)';
+      panel.innerHTML='<div style="display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap"><div><div style="font-size:11px;letter-spacing:.12em;color:#9ca9bd;font-weight:800;margin-bottom:7px">WEBSITE VISIBILITY</div><h2 style="margin:0;font-size:19px">銀のフライパン 公開設定</h2><div id="ginnoVisibilityText" style="margin-top:8px;color:#c8d1df;font-size:13px">状態を確認中...</div></div><button id="ginnoVisibilityBtn" class="btn secondary" disabled>確認中...</button></div><div style="margin-top:12px;font-size:12px;line-height:1.7;color:#9ca9bd">非公開にすると、お客様には「非公開中」の画面だけを表示します。公開に戻すと元のホームページがそのまま表示されます。</div>';
+      grid.parentNode.insertBefore(panel,grid);
+
+      const textEl=$('#ginnoVisibilityText');
+      const btn=$('#ginnoVisibilityBtn');
+      try{
+        const state=await api('/api/admin/site-visibility?origin='+encodeURIComponent('https://ginno-furaipan.com'));
+        const isPublic=!!state.public;
+        textEl.innerHTML=isPublic
+          ? '<span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#173725;color:#55d98b;font-weight:800">● 公開中</span> <span style="margin-left:6px">誰でも閲覧できます</span>'
+          : '<span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#40202a;color:#ffacb4;font-weight:800">● 非公開中</span> <span style="margin-left:6px">一般のお客様には非公開画面を表示</span>';
+        btn.disabled=false;
+        btn.className=isPublic?'btn danger':'btn';
+        btn.textContent=isPublic?'非公開にする':'公開する';
+        btn.onclick=async()=>{
+          const next=!isPublic;
+          const ok=confirm(next
+            ? '銀のフライパンのホームページを公開しますか？\n一般のお客様がすべてのページを見られるようになります。'
+            : '銀のフライパンのホームページを非公開にしますか？\n一般のお客様には「非公開中」と表示されます。');
+          if(!ok)return;
+          btn.disabled=true;
+          btn.textContent=next?'公開中...':'非公開中...';
+          try{
+            await api('/api/admin/site-visibility',{method:'POST',body:JSON.stringify({origin:'https://ginno-furaipan.com',public:next})});
+            location.reload();
+          }catch(e){
+            alert(e.message);
+            btn.disabled=false;
+            btn.textContent=isPublic?'非公開にする':'公開する';
+          }
+        };
+      }catch(e){
+        textEl.textContent='状態を取得できませんでした';
+        btn.textContent='再読み込み';
+        btn.disabled=false;
+        btn.onclick=()=>location.reload();
+      }
+    }
     async function enhance(){
+      ensureVisibilityPanel();
       const root=$('#sites');
       if(!root||root.classList.contains('iwas-enhancing'))return;
       root.classList.add('iwas-enhancing');
