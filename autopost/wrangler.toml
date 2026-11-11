@@ -1,0 +1,32 @@
+name = "two-account-instagram-ai-autoposter"
+main = "src/worker.js"
+compatibility_date = "2026-11-11"
+
+[vars]
+IG_API_VERSION = "v25.0"
+PUBLISH_ENABLED = "false"
+AUTO_APPROVE_TOUCHCD = "false"
+AUTO_APPROVE_IPPUKU = "false"
+ENABLE_TOUCHCD_CONCEPT_ART = "false"
+PUBLIC_BASE_URL = "https://REPLACE-ME.workers.dev"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "two-account-instagram-ai-posts"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "two-account-instagram-media"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+# Required Cloudflare Secrets: ADMIN_API_KEY, TOKEN_ENCRYPTION_KEY,
+# IG_TOKEN_TOUCHCD and IG_TOKEN_IPPUKU.
+# Required account variables: IG_ACCOUNT_ID_TOUCHCD and IG_ACCOUNT_ID_IPPUKU.
+# Meta Instagram Login permissions: instagram_business_basic,
+# instagram_business_content_publish; optional instagram_business_manage_insights.
