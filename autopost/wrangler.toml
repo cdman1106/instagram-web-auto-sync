@@ -6,6 +6,7 @@ compatibility_date = "2026-11-11"
 IG_API_VERSION = "v25.0"
 PUBLISH_ENABLED = "false"
 AUTO_APPROVE_TOUCHCD = "false"
+AUTO_APPROVE_IPPUKU = "false"
 ENABLE_TOUCHCD_CONCEPT_ART = "false"
 PUBLIC_BASE_URL = "https://REPLACE-ME.workers.dev"
 
