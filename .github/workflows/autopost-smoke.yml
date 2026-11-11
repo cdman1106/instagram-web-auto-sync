@@ -1,0 +1,29 @@
+name: Autopost smoke tests
+
+on:
+  pull_request:
+    paths:
+      - "autopost/**"
+      - ".github/workflows/autopost-smoke.yml"
+  push:
+    branches:
+      - feature/two-account-ai-autoposter-20261111
+    paths:
+      - "autopost/**"
+      - ".github/workflows/autopost-smoke.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: autopost
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run offline smoke tests
+        run: npm test
