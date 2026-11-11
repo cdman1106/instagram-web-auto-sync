@@ -1,3 +1,4 @@
+import { adminPage } from './admin-ui.js';
 // Independent Instagram AI autoposter. No existing Instagram-to-website code is modified.
 // Safe defaults: publishing disabled; café requires verified, owner-provided photos.
 const PROFILES = {
@@ -193,7 +194,7 @@ async function createDraft(env, account, localDate) {
     const image = await chooseImage(env, account, localDate, plan.visual);
     const isConcept = image.source === "ai_concept";
     const caption = plan.caption + (isConcept ? "\n\n※画像はイメージイラストです。" : "");
-    const canAutoApprove = account === "touchcd" && env.AUTO_APPROVE_TOUCHCD === "true";
+    const canAutoApprove = (account === "touchcd" && env.AUTO_APPROVE_TOUCHCD === "true") || (account === "ippuku" && env.AUTO_APPROVE_IPPUKU === "true" && image.source === "owner_photo");
     const status = canAutoApprove ? "approved" : "draft";
     await env.DB.prepare(
       "UPDATE posts SET status=?, theme=?, caption=?, image_key=?, image_source=?, error_text=NULL, updated_at=? WHERE id=?"
@@ -206,8 +207,12 @@ async function createDraft(env, account, localDate) {
     console.error("draft", account, reason);
   }
 }
+async function isPaused(env) {
+  const row = await env.DB.prepare("SELECT value FROM app_settings WHERE key = 'paused'").first();
+  return !row || row.value !== '0';
+}
 async function startPublishing(env) {
-  if (env.PUBLISH_ENABLED !== "true") return;
+  if (env.PUBLISH_ENABLED !== "true" || await isPaused(env)) return;
   const rows = await env.DB.prepare(
     "SELECT * FROM posts WHERE status = 'approved' AND publish_after <= ? ORDER BY publish_after ASC LIMIT 2"
   ).bind(Date.now()).all();
@@ -232,7 +237,7 @@ async function startPublishing(env) {
   }
 }
 async function finishPublishing(env) {
-  if (env.PUBLISH_ENABLED !== "true") return;
+  if (env.PUBLISH_ENABLED !== "true" || await isPaused(env)) return;
   const rows = await env.DB.prepare(
     "SELECT * FROM posts WHERE status = 'processing' ORDER BY updated_at ASC LIMIT 3"
   ).all();
@@ -290,10 +295,18 @@ async function adminRequest(req, env, path) {
     const rows = await env.DB.prepare("SELECT account, status, COUNT(*) count FROM posts GROUP BY account,status").all();
     return responseJson({
       publishing_enabled: env.PUBLISH_ENABLED === "true",
+      paused: await isPaused(env),
       touchcd: { account_id_configured: !!env.IG_ACCOUNT_ID_TOUCHCD, token_configured: !!env.IG_TOKEN_TOUCHCD, art_enabled: env.ENABLE_TOUCHCD_CONCEPT_ART === "true", auto_approve: env.AUTO_APPROVE_TOUCHCD === "true" },
-      ippuku: { account_id_configured: !!env.IG_ACCOUNT_ID_IPPUKU, token_configured: !!env.IG_TOKEN_IPPUKU, real_photos_only: true, auto_approve: false },
+      ippuku: { account_id_configured: !!env.IG_ACCOUNT_ID_IPPUKU, token_configured: !!env.IG_TOKEN_IPPUKU, real_photos_only: true, auto_approve: env.AUTO_APPROVE_IPPUKU === 'true' },
       post_counts: rows.results || []
     });
+  }
+  if (path === '/api/admin/pause' && req.method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    if (typeof body.paused !== 'boolean') return responseJson({ error: 'paused must be boolean' }, 400);
+    await env.DB.prepare("INSERT INTO app_settings (key,value,updated_at) VALUES ('paused',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+      .bind(body.paused ? '1' : '0', Date.now()).run();
+    return responseJson({ paused: body.paused });
   }
   if (path === "/api/admin/posts" && req.method === "GET") {
     const rows = await env.DB.prepare(
@@ -336,6 +349,7 @@ async function adminRequest(req, env, path) {
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+    if (url.pathname === '/admin' && req.method === 'GET') return adminPage();
     if (url.pathname === "/health" && req.method === "GET") {
       return responseJson({ ok: true, service: "two-account-instagram-ai-autoposter", live: env.PUBLISH_ENABLED === "true" });
     }
